@@ -1,3 +1,4 @@
+import sys
 import subprocess as sp
 import yaml
 import shutil
@@ -20,6 +21,17 @@ def get_azfuse_env(v, d=None):
     if azfuse_k in os.environ:
         return os.environ[azfuse_k]
     return d
+
+def init_logging():
+    ch = logging.StreamHandler(stream=sys.stdout)
+    ch.setLevel(logging.INFO)
+    logger_fmt = logging.Formatter('%(asctime)s.%(msecs)03d %(process)d:%(filename)s:%(lineno)s %(funcName)10s(): %(message)s')
+    ch.setFormatter(logger_fmt)
+
+    root = logging.getLogger()
+    root.handlers = []
+    root.addHandler(ch)
+    root.setLevel(logging.INFO)
 
 @contextlib.contextmanager
 def robust_open_to_write(fname, mode):
