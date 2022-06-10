@@ -5,19 +5,13 @@ python tool with the data transfer
 implemented through [AzCopy](https://github.com/Azure/azure-storage-azcopy).
 With this tool, reading a file in azure storage is similar to reading a local
 file, which is the same principle of blobfuse. However, the underlying data
-transfer is to leverage azcopy, which provides a much faster speed. With this
-python tool, large amount of files can be cached with one or a few azcopy calls
-rather than to download each file sequentially. This would significantly reduce
-the downloading time. Concurrent file reading is properly handled.
-The tool also provides an asynchronize way to upload the
-cache file to the storage for writing, in which case it does not block the main
-process. 
+transfer is to leverage azcopy, which provides a much faster speed. 
 
 ## Installation
 1. Download azcopy from [here](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10).
-   Copy the azcopy to `~/code/azcopy/azcopy` or `/usr/bin/` and
+   Copy azcopy as `~/code/azcopy/azcopy` or under `/usr/bin/` and
    make it executable.  Make sure it is version 10 or higher.
-2. install it by the following
+2. install by
    ```bash
    pip install git+https://github.com/microsoft/azfuse.git
    ```
@@ -31,23 +25,24 @@ process.
 ## Preliminary
 Azfuse contains 3 different kinds of file paths.
 1. `local` or `logical` path, which is populated by the user script. For example, the user
-   script may want to access the file, named `data/abc.txt`, which is named as
+   script may want to access the file, named `data/abc.txt`, which is referred
+   to as
    `local` path.
 2. `remote` path, which is the path in azure
    storage blob. For example, if the azure storage path is 
    `https://accountname.blob.core.windows.net/containername/path/data/abc.txt`, the
    `remote` path will be `path/data/abc.txt`. Note that, the remote path does not
    include the `containername` in the url.
-3. `cache` path, which is the destination file of the azcopy, e.g. `/tmp/data/abc.txt`.
+3. `cache` path, which is the destination file of the azcopy, e.g. `/tmp/data/abc.txt`. We will use azcopy to download the file here or upload this file to Azure.
 
 The pipeline is
-1. the user script tries to access `data/abc.txt`
+1. the user script tries to access `data/abc.txt` through `with azfuse.File.open()`.
 2. if it is in read mode, the tool will check if the `cache` path exists.
     - if it exists, it returns the handle of the `cache` file
     - if it does not exist, it will download the file from `remote` path to
       `cache` path and return the handle of the `cache` file.
 3. if it is in write mode, the tool will open the `cache` path, and return the
-   handle of the `cache` path. After it finishes, the tool will upload the
+   handle of the `cache` path. Before leaving `with`, the tool will upload the
    `cache` file to `remote` file.
 
 ## Setup
