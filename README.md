@@ -18,9 +18,9 @@ process.
   to the correct azcopy path. azcopy can be downloaded from [here](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10).
   Make sure it is version 10 or higher.
 2. install it by the following
-```bash
-pip install https://github.com/microsoft/azfuse.git
-```
+  ```bash
+  pip install https://github.com/microsoft/azfuse.git
+  ```
 
 ## Preliminary
 Azfuse contains 3 different kinds of file paths.
