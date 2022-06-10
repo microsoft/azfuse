@@ -1,9 +1,8 @@
 from setuptools import setup
-from pip.req import parse_requirements
 
 
-install_reqs = parse_requirements('requirements.txt')
-reqs = [str(ir.req) for ir in install_reqs]
+with open('requirements.txt') as fp:
+    reqs = [l.strip() for l in fp]
 
 description = 'AzFuse: a lightweight blobfuse-like python tool'
 setup(name='azfuse',
