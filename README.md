@@ -14,13 +14,19 @@ cache file to the storage for writing, in which case it does not block the main
 process. 
 
 ## Installation
-1. install azcopy to `~/code/azcopy/azcopy` or make the call of `azcopy` point
-  to the correct azcopy path. azcopy can be downloaded from [here](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10).
-  Make sure it is version 10 or higher.
+1. Download azcopy from [here](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10).
+   Copy the azcopy to `~/code/azcopy/azcopy` or `/usr/bin/` and
+   make it executable.  Make sure it is version 10 or higher.
 2. install it by the following
-  ```bash
-  pip install https://github.com/microsoft/azfuse.git
-  ```
+   ```bash
+   pip install git+https://github.com/microsoft/azfuse.git
+   ```
+   or
+   ```bash
+   git clone https://github.com/microsoft/azfuse.git
+   cd azfuse
+   python setup install
+   ```
 
 ## Preliminary
 Azfuse contains 3 different kinds of file paths.
