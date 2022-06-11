@@ -1,7 +1,6 @@
 import contextlib
 import time
 import sys
-from qd.tsv_io import robust_open_to_write
 from .common import query_all_opened_file_in_system
 from .common import ensure_remove_file
 from .common import has_handle
@@ -29,6 +28,14 @@ from .common import ensure_directory
 logger.propagate = False
 from deprecated import deprecated
 
+
+@contextlib.contextmanager
+def robust_open_to_write(fname, mode):
+    tmp = fname + '.tmp'
+    ensure_directory(op.dirname(tmp))
+    with open(tmp, mode) as fp:
+        yield fp
+    os.rename(tmp, fname)
 
 def create_cloud_storage(x=None, config_file=None, config=None):
     if config is not None:
