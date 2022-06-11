@@ -430,14 +430,13 @@ class AzFuse(object):
                             file_list=file_list,
                             tmp_first=False,
                             sync=False,
-                            retry=10,
+                            retry=1,
                         )
                         for s in sns:
                             if not op.isfile(op.join(cd, s)):
                                 logging.error((op.join(cd, s), file_list))
                     if cache_lock:
                         releaseLock(cache_lock_pt)
-                        #ensure_remove_file(cache_lock_file)
                 releaseLock(lock_fd)
 
     def open(self, fname, mode):
@@ -567,8 +566,8 @@ class AzFuse(object):
         if not op.isfile(cache_file):
             cloud.az_download(
                 remote_file, cache_file,
-                sync=False,
-                is_folder=False,
+                #sync=False,
+                #is_folder=False,
                 retry=5,
             )
             # the following is slower
@@ -589,12 +588,11 @@ class AzFuse(object):
                                touch_cache_if_exist=False,
                                cache_lock=False,
                                ):
-        #if self._ignore_cache:
-            #ensure_remove_file(cache_file)
-        if not op.isfile(cache_file):
+        if op.isfile(cache_file):
+            if touch_cache_if_exist:
+                os.utime(cache_file, None)
+        else:
             self.remote_to_cache(remote_file, cache_file, cloud, cache_lock)
-        elif touch_cache_if_exist:
-            os.utime(cache_file, None)
 
     def list(self, folder, recursive=False):
         info = self.get_remote_cache(folder)
@@ -646,14 +644,8 @@ class CloudStorage(object):
                 prefix=prefix)
                     if b.properties.creation_time.timestamp() > creation_time_larger_than)
         else:
-            def list_blob_names():
-                ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
-                ret = list(ret)
-                return ret
-            return limited_retry_agent(100, list_blob_names)
-            #ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
-            #ret = list(ret)
-            #return ret
+            ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
+            return ret
 
     def du_max_depth_1(self, path, deleted=False):
         from collections import defaultdict
@@ -720,7 +712,7 @@ class CloudStorage(object):
                     self.container_name,
                     name)
         else:
-            if sys.version_info.major == 3 and type(s) is bytes:
+            if type(s) is bytes:
                 self.block_blob_service.create_blob_from_bytes(
                         self.container_name,
                         name,
@@ -899,11 +891,17 @@ class CloudStorage(object):
                         sync=False)
 
     def is_folder(self, remote_path):
-        is_folder = False
-        for x in self.list_blob_names(remote_path + '/'):
-            is_folder = True
-            break
-        return is_folder
+        remote_path = op.normpath(remote_path)
+        def is_folder_once():
+            is_folder = False
+            for x in self.list_blob_names(remote_path + '/'):
+                is_folder = True
+                break
+            return is_folder
+        return limited_retry_agent(
+            10,
+            is_folder_once,
+        )
 
     def az_download_each(self, remote_path, local_path):
         # if it is a folder, we will download each file individually
@@ -1079,10 +1077,7 @@ class CloudStorage(object):
         return result
 
     def dir_exists(self, dir_path):
-        dir_path = op.normpath(dir_path)
-        for x in self.list_blob_names(prefix=dir_path + '/'):
-            return True
-        return False
+        return self.is_folder(dir_path)
 
     @deprecated('no longer used')
     def blob_download_qdoutput(
