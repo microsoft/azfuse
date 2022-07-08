@@ -150,7 +150,7 @@ def create_cloud_fuse(config=None):
     if config is None:
         fname = get_azfuse_env(
             'CLOUD_FUSE_CONFIG_FILE',
-            'aux_data/configs/cloud_fuse_multi.yaml',
+            'aux_data/configs/azfuse.yaml',
         )
         config = load_from_yaml_file(fname)
     assert not isinstance(config, dict)
