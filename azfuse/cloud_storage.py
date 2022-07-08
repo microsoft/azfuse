@@ -13,7 +13,7 @@ from .common import get_azfuse_env
 import shutil
 import multiprocessing as mp
 import os.path as op
-from qd.common import ensure_remove_dir
+from .common import ensure_remove_dir
 from azure.storage.blob import BlockBlobService
 from azure.storage.common.storageclient import logger
 import glob
@@ -158,7 +158,7 @@ def create_cloud_fuse(config=None):
 
 def garbage_collection_for_cloud_fuse_loop(local_folders, total_size_limit):
     logging.info('size limit = {}'.format(total_size_limit))
-    from qd.common import find_mount_point, list_to_dict
+    from .common import find_mount_point, list_to_dict
     mount_path = [(find_mount_point(l), l) for l in local_folders]
     mount2paths = list_to_dict(mount_path, 0)
     while True:
@@ -170,7 +170,7 @@ def garbage_collection_for_cloud_fuse_loop(local_folders, total_size_limit):
                     curr_limit = x.total * total_size_limit
                 garbage_collection_for_cloud_fuse(paths, curr_limit)
         except:
-            from qd.common import print_trace
+            from .common import print_trace
             print_trace()
         time.sleep(10)
 
@@ -267,7 +267,7 @@ def async_upload_files(infos, account2cloud):
                         i['sub_name']]
                        for i in infos if
                        op.isfile(op.join(i['cache'], i['sub_name']))]
-    from qd.common import list_to_dict
+    from .common import list_to_dict
     rd_cd_ac_to_sns = list_to_dict(rd_cd_ac_and_sn, 0)
     for (rd, cd, ac), sns in rd_cd_ac_to_sns.items():
         if ac not in account2cloud:
@@ -407,7 +407,7 @@ class AzFuse(object):
                 remote_cache_infos = [info for info in remote_cache_infos if
                                       not op.isfile(op.join(info['cache'], info['sub_name']))]
                 remote_cache_infos = [((info['remote'], info['cache']), info) for info in remote_cache_infos]
-                from qd.common import list_to_dict
+                from .common import list_to_dict
                 rd_cd_to_infos = list_to_dict(remote_cache_infos, 0)
                 for (rd, cd), infos in rd_cd_to_infos.items():
                     sns = [i['sub_name'] for i in infos]
@@ -1168,12 +1168,3 @@ class CloudStorage(object):
                 pass
                     #self.download_to_path(f, target_f)
 
-if __name__ == '__main__':
-    from qd.common import init_logging
-    from qd.common import parse_general_args
-    init_logging()
-    kwargs = parse_general_args()
-    logging.info('param:\n{}'.format(pformat(kwargs)))
-    function_name = kwargs['type']
-    del kwargs['type']
-    locals()[function_name](**kwargs)

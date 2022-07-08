@@ -1,5 +1,6 @@
 import sys
 import subprocess as sp
+from collections import OrderedDict
 import yaml
 import shutil
 import re
@@ -213,6 +214,23 @@ def limited_retry_agent(num, func, *args, **kwargs):
                 raise
             t = random.random() * 5
             time.sleep(t)
+
+def list_to_dict(l, idx, keep_one=False):
+    result = OrderedDict()
+    for x in l:
+        if x[idx] not in result:
+            result[x[idx]] = []
+        y = x[:idx] + x[idx + 1:]
+        if not keep_one and len(y) == 1:
+            y = y[0]
+        result[x[idx]].append(y)
+    return result
+
+def find_mount_point(path):
+    path = op.abspath(path)
+    while not op.ismount(path):
+        path = op.dirname(path)
+    return path
 
 @try_once
 def ensure_remove_dir(d):
