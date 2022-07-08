@@ -972,7 +972,6 @@ class CloudStorage(object):
         if tmp_first:
             local_path = local_path + '.tmp'
         ensure_directory(op.dirname(local_path))
-        assert self.sas_token
         cmd = []
         cmd.append(get_azcopy())
         if sync:
@@ -981,9 +980,10 @@ class CloudStorage(object):
             cmd.append('cp')
         url = 'https://{}.blob.core.windows.net'.format(self.account_name)
         url = '/'.join([url, self.container_name, remote_path])
-        assert self.sas_token.startswith('?')
         data_url = url
-        url = url + self.sas_token
+        if self.sas_token:
+            assert self.sas_token.startswith('?')
+            url = url + self.sas_token
         cmd.append(url)
         if file_list:
             # requirements from file_list
