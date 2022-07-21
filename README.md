@@ -46,9 +46,15 @@ The pipeline is
    `cache` file to `remote` file.
 
 ## Setup
-1. Set the environment variable of `AZFUSE_CLOUD_FUSE_CONFIG_FILE` as the
+1. By default, the feature is disabled. That is, the file read/write will
+   directly access the `local` file without trying to access the `remote` in
+   azure blob. Thus, it is also recommended to first use such tool, but not
+   to enable it (also, no need to configure it).
+   To enable it, set `AZFUSE_USE_FUSE=1` explicitly. The following describes
+   how to configure it when enabled.
+2. Set the environment variable of `AZFUSE_CLOUD_FUSE_CONFIG_FILE` as the
    configuration file path, e.g. `AZFUSE_CLOUD_FUSE_CONFIG_FILE=./aux_data/configs/azfuse.yaml`
-2. The configuration file is in yaml format, and is a list of dictionary. Each
+3. The configuration file is in yaml format, and is a list of dictionary. Each
    dictionary contains `local`, `remote`, `cache`, and `storage_account`.
    ```yaml
    - cache: /tmp/azfuse/data
@@ -64,7 +70,9 @@ The pipeline is
    local path is `data/abc.txt`, the `cache` path will be
    `/tmp/azfuse/data/abc.txt`, and the `remote` path will be
    `azfuse_data/abc.txt`. The tool will match each prefix from the first to the
-   last, and the one which is matched first will be the one used.
+   last, and the one which is matched first will be the one used. If there is
+   no match, it will assume this is a local file, which can also be a blobfuse
+   mount file.
 
    The storage account here is the base file name. Here, the path will be
    `./aux_data/storage_account/storage_config_name.yaml`. The folder can be
@@ -76,10 +84,8 @@ The pipeline is
    sas_token: sastoken
    container_name: containername
    ```
-   `account_key` or `sas_token` can be `null`. The `sas_token` should start from
+   `account_key` or `sas_token` can be `null`. The `sas_token` should start with
    `?`.
-3. Enable the feature by setting `AZFUSE_USE_FUSE=1`. By default, it is
-   disabled, and the file access is the same as to access the local folder.
 
 ## Examples
 - Open a file to read
