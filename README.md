@@ -136,6 +136,46 @@ The pipeline is
   In this case, the upload process
   will delete the cache file once it is uploaded.
 
+## Tips
+- Safe to read the same file from multiple processes
+
+  A lock is implemented to make sure there is only one process to launch
+  azcopy if the file is not available in `cache`. The other processes will not
+  re-launch the azcopy as long as it is ready in `cache`.
+
+- Clear cache if the file is updated on another machines
+  
+  For the sake of speed, the tool does not check if the cached file is
+  up-to-date. That is, if the file is updated on another machine, the current
+  machine's cached file may be out-of-date. In this case, call
+  `File.clear_cache(local_path)`. The parameter here is not `cache` path.
+
+- No need to clear cache for writing
+  
+  No matter whether there is an existing file in Blob, the writing will always
+  overwrite the existing file or creating a new file in Blob
+
+- Patch the function if the `open` is inside some package.
+
+  For example, in the package of [Deepspeed](https://github.com/microsoft/deepspeed), the `torch.save` is invoked in
+  `model_engine.save_checkpoint`. We can patch `torch.save` by the following
+  example.
+  ```python
+  def torch_load_patch(origin_load, f, *args, **kwargs):
+      import io
+      with File.open(f, 'rb') as fp:
+          buf = io.BytesIO(fp.read())
+      result = origin_load(buf, map_location=lambda storage, loc: storage)
+      return result
+  
+  def patch_torch_save():
+      old_save = torch.save
+      torch.save = lambda *args, **kwargs: torch_save_patch(old_save, *args, **kwargs)
+      return old_save
+  ```
+  With the context of `File.async_upload(enabled=True, shm_as_tmp=True)`, we
+  can easily have the feature of asynchronously uploading the checkpoint to Azure
+  Blob.
 
 
 ## Contributing
