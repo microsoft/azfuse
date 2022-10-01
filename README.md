@@ -19,7 +19,7 @@ transfer is to leverage azcopy, which provides a much faster speed.
    ```bash
    git clone https://github.com/microsoft/azfuse.git
    cd azfuse
-   python setup install
+   python setup.py install
    ```
 
 ## Preliminary
