@@ -13,6 +13,33 @@ import os
 import contextlib
 
 
+def get_table_print_lines(a_to_bs, all_key):
+    if len(a_to_bs) == 0:
+        logging.info('no rows')
+        return []
+    if not all_key:
+        all_key = []
+        for a_to_b in a_to_bs:
+            all_key.extend(a_to_b.keys())
+        all_key = sorted(list(set(all_key)))
+    all_width = [max([len(str(a_to_b.get(k, ''))) for a_to_b in a_to_bs] +
+        [len(k)]) for k in all_key]
+    row_format = ' '.join(['{{:{}}}'.format(w) for w in all_width])
+
+    all_line = []
+    line = row_format.format(*all_key)
+    all_line.append(line.strip())
+    for a_to_b in a_to_bs:
+        line = row_format.format(*[str(a_to_b.get(k, '')) for k in all_key])
+        all_line.append(line)
+    return all_line
+
+def print_table(a_to_bs, all_key=None, **kwargs):
+    if len(a_to_bs) == 0:
+        return
+    all_line = get_table_print_lines(a_to_bs, all_key)
+    logging.info('\n{}'.format('\n'.join(all_line)))
+
 def get_azfuse_env(v, d=None):
     # this is for back-compatibility only
     qd_k = 'QD_' + v

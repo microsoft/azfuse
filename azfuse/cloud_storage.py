@@ -20,6 +20,7 @@ import glob
 from pprint import pformat
 from .common import load_from_yaml_file
 from .common import cmd_run
+import subprocess as sp
 from .common import parse_iteration
 import logging
 from tqdm import tqdm
@@ -368,6 +369,14 @@ class AzFuse(object):
         return self.account2cloud[info['storage_account']].query_info(
             remote_file)['size_in_bytes']
 
+    def get_creation_time(self, fname):
+        info = self.get_remote_cache(fname)
+        if len(info) == 0:
+            return os.path.getmtime(fname)
+        remote_file = op.join(info['remote'], info['sub_name'])
+        return self.account2cloud[info['storage_account']].query_info(
+            remote_file)['creation_time']
+
     def clear_cache(self, folder):
         info = self.get_remote_cache(folder)
         t = op.join(info['cache'], info['sub_name'])
@@ -375,7 +384,14 @@ class AzFuse(object):
         ensure_remove_dir(t)
         ensure_remove_file(t)
 
-    def ensure_cache(self, fname_or_fs, touch_cache_if_exist=False):
+    def ensure_cache(self, fname_or_fs,
+                     touch_cache_if_exist=False):
+        if isinstance(fname_or_fs, (tuple, list)) and len(fname_or_fs) == 1:
+            fname_or_fs = fname_or_fs[0]
+        if isinstance(fname_or_fs, (tuple, list)):
+            fname_or_fs = list(set(fname_or_fs))
+            if len(fname_or_fs) == 1:
+                fname_or_fs = fname_or_fs[0]
         if isinstance(fname_or_fs, str):
             fname = fname_or_fs
             info = self.get_remote_cache(fname)
@@ -540,7 +556,10 @@ class AzFuse(object):
 
     def get_remote_cache(self, fname):
         fname = op.abspath(fname)
-        infos = [c for c in self.config if fname.startswith(c['local'] + '/')]
+        infos = [
+            c for c in self.config if
+            fname.startswith(c['local'] + '/') or fname == c['local']
+        ]
         if len(infos) == 0:
             return {}
         info = infos[0]
@@ -594,19 +613,71 @@ class AzFuse(object):
         else:
             self.remote_to_cache(remote_file, cache_file, cloud, cache_lock)
 
-    def list(self, folder, recursive=False):
+    def list(self, folder, recursive=False, return_info=False):
         info = self.get_remote_cache(folder)
         if len(info) == 0:
             return glob.glob(op.join(folder, '*'), recursive=recursive)
         else:
             cloud = self.account2cloud[info['storage_account']]
-            remote_folder = op.join(info['remote'], info['sub_name'])
-            ret = list(cloud.list_blob_names(remote_folder + '/'))
-
-            if not recursive:
-                return [r.replace(remote_folder, folder) for r in ret if op.dirname(r) == remote_folder]
+            if info['sub_name'] == '':
+                remote_folder = info['remote']
             else:
-                return [r.replace(remote_folder, folder) for r in ret]
+                remote_folder = op.join(info['remote'], info['sub_name'])
+            while remote_folder.endswith('/'):
+                remote_folder = remote_folder[:-1]
+            if not return_info:
+                if remote_folder == '':
+                    ret = list(cloud.list_blob_names())
+                else:
+                    ret = list(cloud.list_blob_names(remote_folder + '/'))
+                if not recursive:
+                    result = []
+                    for r in ret:
+                        rest = r[len(remote_folder):]
+                        while rest.startswith('/'):
+                            rest = rest[1:]
+                        idx = rest.find('/')
+                        if idx != -1:
+                            rest = rest[:idx]
+                        result.append(rest)
+                    result = list(set(result))
+                    result = sorted(result)
+                    return [op.join(folder, r) for r in result]
+                else:
+                    return [r.replace(remote_folder, folder) for r in ret]
+            else:
+                prefix = None
+                if remote_folder:
+                    prefix = remote_folder + '/'
+                ret = list(cloud.iter_blob_info(prefix))
+                if not recursive:
+                    result = {}
+                    for r in ret:
+                        rest = r['name'][len(remote_folder):]
+                        while rest.startswith('/'):
+                            rest = rest[1:]
+                        idx = rest.find('/')
+                        if idx != -1:
+                            rest = rest[:idx]
+                        r['name'] = rest
+                        if r['name'] in result:
+                            result[r['name']]['size_in_bytes'] += r['size_in_bytes']
+                            result[r['name']]['creation_time'] = min(
+                                result[r['name']]['creation_time'],
+                                r['creation_time']
+                            )
+                        else:
+                            result[r['name']] = r
+                    result = result.values()
+                    result = sorted(result, key=lambda r: r['name'])
+                    for r in result:
+                        r['name'] = op.join(folder, r['name'])
+                    return result
+                else:
+                    for r in ret:
+                        r['name'] = r['name'].replace(remote_folder, folder)
+                    return ret
+
 
 class CloudStorage(object):
     def __init__(self, config=None):
@@ -637,15 +708,17 @@ class CloudStorage(object):
         return self._block_blob_service
 
     def list_blob_names(self, prefix=None, creation_time_larger_than=None):
-        if creation_time_larger_than is not None:
-            creation_time_larger_than = creation_time_larger_than.timestamp()
-            return (b.name for b in self.block_blob_service.list_blobs(
-                self.container_name,
-                prefix=prefix)
-                    if b.properties.creation_time.timestamp() > creation_time_larger_than)
-        else:
-            ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
-            return ret
+        for info in self.iter_blob_info(prefix, creation_time_larger_than):
+            yield info['name']
+        #if creation_time_larger_than is not None:
+            #creation_time_larger_than = creation_time_larger_than.timestamp()
+            #return (b.name for b in self.block_blob_service.list_blobs(
+                #self.container_name,
+                #prefix=prefix)
+                    #if b.properties.creation_time.timestamp() > creation_time_larger_than)
+        #else:
+            #ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
+            #return ret
 
     def du_max_depth_1(self, path, deleted=False):
         from collections import defaultdict
@@ -823,7 +896,12 @@ class CloudStorage(object):
         if from_url == data_url:
             logging.info('no need to sync data as url is exactly the same')
             return data_url, url
-        cmd_run(cmd)
+        if int(get_azfuse_env('AZCOPY_NO_LOG', '0')):
+            import subprocess
+            stdout = subprocess.DEVNULL
+        else:
+            stdout = None
+        cmd_run(cmd, stdout=stdout, stderr=sp.PIPE)
         return data_url, url
 
     def upload_from_local(self, src_dir, dest_dir, file_list=None):
@@ -927,8 +1005,11 @@ class CloudStorage(object):
                     is_folder=None,
                     tmp_first=True,
                     file_list=None,
-                    retry=5,
+                    retry=30,
                     ):
+        # retry = 5 is good enough for premium storage account, but it seems
+        # like it is not for standard. Here we change it to 30 and see if it
+        # works well
         limited_retry_agent(retry, self.az_download_once,
                             remote_path, local_path, sync,
                             is_folder, tmp_first, file_list)

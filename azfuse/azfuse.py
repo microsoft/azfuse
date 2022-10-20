@@ -95,11 +95,13 @@ class File(object):
             return get_file_size(fname)
 
     @classmethod
-    def list(cls, folder, recursive=False):
+    def list(cls, folder, recursive=False, return_info=False):
         cls.ensure_initialized()
         if cls.use_fuser:
-            return cls.fuser.list(folder, recursive=recursive)
+            return cls.fuser.list(folder, recursive=recursive,
+                                  return_info=return_info)
         else:
+            assert not return_info
             return glob.glob(op.join(folder, '*'), recursive=recursive)
 
     @classmethod
@@ -111,3 +113,13 @@ class File(object):
         if cls.use_fuser:
             cls.fuser.ensure_cache(fnames)
 
+    @classmethod
+    def get_cache_file(cls, file_name):
+        if cls.use_fuser:
+            info = cls.fuser.get_remote_cache(file_name)
+            if info:
+                return op.join(info['cache'], info['sub_name'])
+            else:
+                return file_name
+        else:
+            return file_name
