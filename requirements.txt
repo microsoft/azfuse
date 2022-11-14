@@ -1,3 +1,5 @@
 azure-storage-blob==2.1.0
 deprecated
 psutil
+tqdm
+pyyaml
