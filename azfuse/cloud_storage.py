@@ -323,6 +323,11 @@ class AzFuse(object):
         p.start()
         return p
 
+    def get_url(self, fname):
+        info = self.get_remote_cache(fname)
+        remote_file = op.join(info['remote'], info['sub_name'])
+        return self.account2cloud[info['storage_account']].get_url(remote_file)
+
     def ensure_init_async_upload_thread(self):
         if self.async_upload_thread is None:
             self.async_upload_thread = self.launch_async_upload_thread_entry()
@@ -383,6 +388,12 @@ class AzFuse(object):
         logging.info(t)
         ensure_remove_dir(t)
         ensure_remove_file(t)
+
+    def upload(self, cache, fname):
+        info = self.get_remote_cache(fname)
+        cloud = self.account2cloud[info['storage_account']]
+        remote_file = op.join(info['remote'], info['sub_name'])
+        cloud.upload_file(cache, remote_file)
 
     def ensure_cache(self, fname_or_fs,
                      touch_cache_if_exist=False):
@@ -650,6 +661,8 @@ class AzFuse(object):
                 if remote_folder:
                     prefix = remote_folder + '/'
                 ret = list(cloud.iter_blob_info(prefix))
+                if len(ret) == 0:
+                    ret.append(cloud.query_info(remote_folder))
                 if not recursive:
                     result = {}
                     for r in ret:
@@ -710,15 +723,6 @@ class CloudStorage(object):
     def list_blob_names(self, prefix=None, creation_time_larger_than=None):
         for info in self.iter_blob_info(prefix, creation_time_larger_than):
             yield info['name']
-        #if creation_time_larger_than is not None:
-            #creation_time_larger_than = creation_time_larger_than.timestamp()
-            #return (b.name for b in self.block_blob_service.list_blobs(
-                #self.container_name,
-                #prefix=prefix)
-                    #if b.properties.creation_time.timestamp() > creation_time_larger_than)
-        #else:
-            #ret = self.block_blob_service.list_blob_names(self.container_name, prefix=prefix)
-            #return ret
 
     def du_max_depth_1(self, path, deleted=False):
         from collections import defaultdict
@@ -747,7 +751,7 @@ class CloudStorage(object):
                        ):
         def valid(b):
             c1 = creation_time_larger_than is None or b.properties.creation_time.timestamp() > creation_time_larger_than.timestamp()
-            c2 = b.name.startswith(prefix)
+            c2 = b.name.startswith(prefix) if prefix else True
             return c1 and c2 and (not deleted or b.deleted)
         for b in self.block_blob_service.list_blobs(
             self.container_name,
@@ -759,6 +763,7 @@ class CloudStorage(object):
                     'name': b.name,
                     'size_in_bytes': b.properties.content_length,
                     'creation_time': b.properties.creation_time,
+                    'last_modified': b.properties.last_modified,
                 }
 
     def list_blob_info(self, prefix=None, creation_time_larger_than=None):
@@ -956,6 +961,7 @@ class CloudStorage(object):
         result = {
             'size_in_bytes': p.properties.content_length,
             'creation_time': p.properties.creation_time,
+            'name': path,
         }
         return result
 

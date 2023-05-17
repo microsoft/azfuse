@@ -114,6 +114,12 @@ class File(object):
             cls.fuser.ensure_cache(fnames)
 
     @classmethod
+    def upload(cls, cache, remote):
+        cls.ensure_initialized()
+        if cls.use_fuser:
+            cls.fuser.upload(cache, remote)
+
+    @classmethod
     def get_cache_file(cls, file_name):
         if cls.use_fuser:
             info = cls.fuser.get_remote_cache(file_name)
