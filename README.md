@@ -178,6 +178,45 @@ The pipeline is
   can easily have the feature of asynchronously uploading the checkpoint to Azure
   Blob.
 
+## Command line
+A command line tool is provided for some data management.
+### setup
+    set the following alias to use azfuse as a command line.
+   ```
+    alias azfuse='ipython --pdb -m azfuse --'
+   ```
+### usage
+- read a `local file`.
+  ```
+  azfuse cat data/file.tsv
+  azfuse head data/file.tsv
+  azfuse tail data/file.tsv
+  azfuse display data/file.png
+  azfuse nvim data/file.txt
+  ```
+  If you know the `cache file` is out of date, please manually delete the
+  cache file and re-run this command.
+- list the files under a folder
+  ```
+  azfuse ls data/sub_folder
+  ```
+- get the url of a `local file`, which refers to the remote file
+  ```
+  azfuse url data/file.tsv
+  ```
+  The SAS token is generated with 30 days expairation date. This is normally
+  used for data sharing.
+- delete the `remote file`. Please note that this operation cannot be un-do.
+  Run it very extreme care.
+  ```
+  azfuse rm data/file.tsv
+  ```
+- update a file
+  ```
+  azfuse update data/file.txt
+  ```
+  This will launch neovim as default. If the file changes, the changed content
+  will be uploaded, and the change cannot be reverted. Thus, please also be careful.
 
 ## Contributing
 
