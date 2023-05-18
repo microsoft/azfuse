@@ -208,10 +208,10 @@ A command line tool is provided for some data management.
   ```
   The SAS token is generated with 30 days expairation date. This is normally
   used for data sharing.
-- delete the `remote file`. Please note that this operation cannot be un-do.
-  Run it very extreme care.
+- delete the `remote file`. Please note that this operation cannot be reverted.
+  Run it with extreme care.
   ```
-  azfuse rm data/file.tsv
+  azfuse rm data/local_path.tsv
   ```
 - update a file
   ```
