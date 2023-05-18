@@ -180,11 +180,13 @@ The pipeline is
 
 ## Command line
 A command line tool is provided for some data management.
+
 ### setup
-    set the following alias to use azfuse as a command line.
+   set the following alias to use azfuse as a command line.
    ```
-    alias azfuse='ipython --pdb -m azfuse --'
+   alias azfuse='ipython --pdb -m azfuse --'
    ```
+
 ### usage
 - read a `local file`.
   ```
