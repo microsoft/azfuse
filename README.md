@@ -3,8 +3,8 @@
 AzFuse is a lightweight [blobfuse](https://github.com/Azure/azure-storage-fuse)-like
 python tool with the data transfer
 implemented through [AzCopy](https://github.com/Azure/azure-storage-azcopy).
-With this tool, reading a file in azure storage is similar to reading a local
-file, which is the same principle of blobfuse. However, the underlying data
+With this tool, reading/writing a file in azure storage is similar to reading a local
+file, which follows the same principle of blobfuse. However, the underlying data
 transfer is to leverage azcopy, which provides a much faster speed. 
 
 ## Installation
