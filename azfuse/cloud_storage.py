@@ -1,6 +1,4 @@
 import contextlib
-import time
-import sys
 from .common import query_all_opened_file_in_system
 from .common import ensure_remove_file
 from .common import has_handle
@@ -14,7 +12,6 @@ import shutil
 import multiprocessing as mp
 import os.path as op
 from .common import ensure_remove_dir
-from azure.storage.blob import BlockBlobService
 from azure.storage.common.storageclient import logger
 import glob
 from pprint import pformat
@@ -28,13 +25,14 @@ import os
 from .common import ensure_directory
 logger.propagate = False
 from deprecated import deprecated
+import io
 
 
 @contextlib.contextmanager
 def robust_open_to_write(fname, mode):
     tmp = fname + '.tmp'
     ensure_directory(op.dirname(tmp))
-    with open(tmp, mode) as fp:
+    with io.open(tmp, mode) as fp:
         yield fp
     os.rename(tmp, fname)
 
@@ -470,7 +468,8 @@ class AzFuse(object):
         info = self.get_remote_cache(fname)
         if len(info) == 0:
             if mode in ['r', 'rb']:
-                return open(fname, mode)
+                import io
+                return io.open(fname, mode)
             else:
                 assert mode in ['w', 'wb'], f'{mode} is not supported'
                 return robust_open_to_write(fname, mode)
@@ -499,7 +498,7 @@ class AzFuse(object):
         cache_file = op.join(info['cache'], info['sub_name'])
         tmp_cache_file = cache_file + '.tmpwrite'
         ensure_directory(op.dirname(tmp_cache_file))
-        with open(tmp_cache_file, mode) as fp:
+        with io.open(tmp_cache_file, mode) as fp:
             yield fp
         os.rename(tmp_cache_file, cache_file)
         if self.async_upload_enabled:
@@ -518,7 +517,7 @@ class AzFuse(object):
         self.ensure_remote_to_cache(remote_file, cache_file, cloud,
                                     cache_lock=info.get('cache_lock'))
         after_to_cache = time.time()
-        ret = open(cache_file, mode)
+        ret = io.open(cache_file, mode)
         after_open = time.time()
         if after_open - start > 10:
             logging.warning('download {} to {}: {}; open cache: {}'.format(
@@ -624,6 +623,13 @@ class AzFuse(object):
         else:
             self.remote_to_cache(remote_file, cache_file, cloud, cache_lock)
 
+    def set_access_tier(self, fname, tier):
+        info = self.get_remote_cache(fname)
+        if len(info) == 0:
+            return
+        cloud = self.account2cloud[info['storage_account']]
+        cloud.set_access_tier(op.join(info['remote'], info['sub_name']), tier)
+
     def list(self, folder, recursive=False, return_info=False):
         info = self.get_remote_cache(folder)
         if len(info) == 0:
@@ -691,6 +697,11 @@ class AzFuse(object):
                         r['name'] = r['name'].replace(remote_folder, folder)
                     return ret
 
+def get_storage_package_version():
+    import pkg_resources
+    azure_storage_blob_version = pkg_resources.get_distribution('azure-storage-blob').version
+    # e.g. 2.1.0
+    return azure_storage_blob_version
 
 class CloudStorage(object):
     def __init__(self, config=None):
@@ -704,6 +715,13 @@ class CloudStorage(object):
         self.account_name = account_name
         self.account_key = account_key
         self._block_blob_service = None
+        self._is_new_package = None
+
+    @property
+    def is_new_package(self):
+        if self._is_new_package is None:
+            self._is_new_package = get_storage_package_version().startswith('12.')
+        return self._is_new_package
 
     def __repr__(self):
         return 'CloudStorage(account={}, container={})'.format(
@@ -714,15 +732,36 @@ class CloudStorage(object):
     @property
     def block_blob_service(self):
         if self._block_blob_service is None:
-            self._block_blob_service = BlockBlobService(
-                    account_name=self.account_name,
-                    account_key=self.account_key,
-                    sas_token=self.sas_token)
+            if self.is_new_package:
+                from azure.storage.blob import BlobServiceClient
+                if self.sas_token:
+                    self._block_blob_service = BlobServiceClient(
+                        account_url='https://{}.blob.core.windows.net'.format(self.account_name),
+                        credential=self.sas_token)
+                else:
+                    self._block_blob_service = BlobServiceClient(
+                        account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
+                        credential={'account_name': self.account_name, 'account_key': self.account_key})
+            else:
+                from azure.storage.blob import BlockBlobService
+                self._block_blob_service = BlockBlobService(
+                        account_name=self.account_name,
+                        account_key=self.account_key,
+                        sas_token=self.sas_token)
         return self._block_blob_service
+
+    @property
+    def container_client(self):
+        assert self.is_new_package
+        return self.block_blob_service.get_container_client(self.container_name)
 
     def list_blob_names(self, prefix=None, creation_time_larger_than=None):
         for info in self.iter_blob_info(prefix, creation_time_larger_than):
             yield info['name']
+
+    def set_access_tier(self, fname, tier):
+        blob_client = self.container_client.get_blob_client(fname)
+        blob_client.set_standard_blob_tier(tier)
 
     def du_max_depth_1(self, path, deleted=False):
         from collections import defaultdict
@@ -749,22 +788,47 @@ class CloudStorage(object):
                        creation_time_larger_than=None,
                        deleted=False,
                        ):
-        def valid(b):
-            c1 = creation_time_larger_than is None or b.properties.creation_time.timestamp() > creation_time_larger_than.timestamp()
-            c2 = b.name.startswith(prefix) if prefix else True
-            return c1 and c2 and (not deleted or b.deleted)
-        for b in self.block_blob_service.list_blobs(
-            self.container_name,
-            prefix=prefix,
-            include='deleted' if deleted else None,
-        ):
-            if valid(b):
-                yield {
-                    'name': b.name,
-                    'size_in_bytes': b.properties.content_length,
-                    'creation_time': b.properties.creation_time,
-                    'last_modified': b.properties.last_modified,
-                }
+        if not self.is_new_package:
+            def valid(b):
+                c1 = creation_time_larger_than is None or b.properties.creation_time.timestamp() > creation_time_larger_than.timestamp()
+                c2 = b.name.startswith(prefix) if prefix else True
+                return c1 and c2 and (not deleted or b.deleted)
+            for b in self.block_blob_service.list_blobs(
+                self.container_name,
+                prefix=prefix,
+                include='deleted' if deleted else None,
+            ):
+                if valid(b):
+                    yield {
+                        'name': b.name,
+                        'size_in_bytes': b.properties.content_length,
+                        'creation_time': b.properties.creation_time,
+                        'last_modified': b.properties.last_modified,
+                    }
+        else:
+            def valid(b):
+                c1 = creation_time_larger_than is None or b.creation_time.timestamp() > creation_time_larger_than.timestamp()
+                c2 = b.name.startswith(prefix) if prefix else True
+                return c1 and c2 and (not deleted or b.deleted)
+            for b in self.container_client.list_blobs(
+                name_starts_with=prefix,
+                include='deleted' if deleted else None,
+            ):
+                if valid(b):
+                    yield {
+                        'name': b.name,
+                        'size_in_bytes': b.size,
+                        'creation_time': b.creation_time,
+                        'last_modified': b.last_modified,
+                        'blob_tier': self.get_access_tier(b)
+                    }
+
+    def get_access_tier(self, blob_properties):
+        blob_tier = blob_properties.blob_tier
+        if blob_tier == 'Archive' and blob_properties.archive_status:
+            if 'pending' in blob_properties.archive_status:
+                blob_tier = blob_properties.archive_status
+        return blob_tier
 
     def list_blob_info(self, prefix=None, creation_time_larger_than=None):
         return list(self.iter_blob_info(prefix, creation_time_larger_than))
@@ -953,16 +1017,31 @@ class CloudStorage(object):
         return self.upload(src_dir, dest_dir)
 
     def query_info(self, path):
-        try:
-            p = self.block_blob_service.get_blob_properties(self.container_name, path)
-        except:
-            logging.info('{}: {}'.format(self.container_name, path))
-            raise
-        result = {
-            'size_in_bytes': p.properties.content_length,
-            'creation_time': p.properties.creation_time,
-            'name': path,
-        }
+        if not self.is_new_package:
+            try:
+                p = self.block_blob_service.get_blob_properties(self.container_name, path)
+            except:
+                logging.info('{}: {}'.format(self.container_name, path))
+                raise
+            result = {
+                'size_in_bytes': p.properties.content_length,
+                'creation_time': p.properties.creation_time,
+                'name': path,
+            }
+        else:
+            try:
+                blob_client = self.container_client.get_blob_client(path)
+            except:
+                logging.info('{}: {}'.format(self.container_name, path))
+                raise
+            blob_properties = blob_client.get_blob_properties()
+            blob_tier = self.get_access_tier(blob_properties)
+            result = {
+                'size_in_bytes': blob_properties.size,
+                'creation_time': blob_properties.creation_time,
+                'blob_tier': blob_tier,
+                'name': path,
+            }
         return result
 
     def az_download_all(self, remote_path, local_path):

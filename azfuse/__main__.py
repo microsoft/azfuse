@@ -10,6 +10,7 @@ def execute(task_type, **kwargs):
         yaml_file = op.join('aux_data', 'azfuse', kwargs['name'] + '.yaml')
         os.environ['QD_CLOUD_FUSE_CONFIG_FILE'] = yaml_file
         os.environ['AZFUSE_CLOUD_FUSE_CONFIG_FILE'] = yaml_file
+
     if task_type in ['download', 'd']:
         File.prepare(kwargs['remainders'])
     elif task_type in ['cp']:
@@ -58,6 +59,9 @@ def execute(task_type, **kwargs):
                 File.rm(r)
             except azure.common.AzureMissingResourceHttpError:
                 pass
+    elif task_type == 'cold':
+        for r in kwargs['remainders']:
+            File.set_access_tier(r, 'cold')
     else:
         assert 'Unknown {}'.format(task_type)
 
@@ -71,6 +75,7 @@ def parse_args():
                                  'cp',
                                  'url',
                                  'ls',
+                                 'cold',
                                  'rm',
                                  'head',
                                  'tail',
