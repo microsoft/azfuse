@@ -393,6 +393,14 @@ class AzFuse(object):
         remote_file = op.join(info['remote'], info['sub_name'])
         cloud.upload_file(cache, remote_file)
 
+    def upload_from_remote(self, fname, from_fuse):
+        info = self.get_remote_cache(fname)
+        remote_info = from_fuse.get_remote_cache(fname)
+        cloud = self.account2cloud[info['storage_account']]
+        cloud.upload(op.join(info['remote'], info['sub_name']),
+                     op.join(remote_info['remote'], remote_info['sub_name']),
+                     from_blob=from_fuse.account2cloud[remote_info['storage_account']])
+
     def ensure_cache(self, fname_or_fs,
                      touch_cache_if_exist=False):
         if isinstance(fname_or_fs, (tuple, list)) and len(fname_or_fs) == 1:
@@ -1233,12 +1241,16 @@ class CloudStorage(object):
 
     def file_exists(self, path):
         fp = acquireLock('/tmp/{}.lock'.format(hash_sha1(path)))
-        result = limited_retry_agent(
-            5,
-            self.block_blob_service.exists,
-            self.container_name, path
-        )
-        #result = self.block_blob_service.exists(self.container_name, path)
+        if self.is_new_package:
+            result = self.container_client.get_blob_client(path).exists()
+        else:
+            result = limited_retry_agent(
+                5,
+                self.block_blob_service.exists,
+                self.container_name,
+                path
+            )
+            #result = self.block_blob_service.exists(self.container_name, path)
         releaseLock(fp)
         return result
 

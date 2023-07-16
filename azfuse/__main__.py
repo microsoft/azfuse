@@ -3,6 +3,8 @@ import os.path as op
 from pprint import pformat
 import logging
 from .azfuse import File
+from .common import load_from_yaml_file
+from .cloud_storage import create_cloud_fuse
 
 
 def execute(task_type, **kwargs):
@@ -24,7 +26,6 @@ def execute(task_type, **kwargs):
         print_table(ret)
     elif task_type in ['url']:
         assert len(kwargs['remainders']) == 1
-        from .cloud_storage import create_cloud_fuse
         c = create_cloud_fuse()
         logging.info(c.get_url(kwargs['remainders'][0]))
     elif task_type in ['head', 'tail', 'nvim', 'cat', 'display']:
@@ -62,6 +63,15 @@ def execute(task_type, **kwargs):
     elif task_type == 'cold':
         for r in kwargs['remainders']:
             File.set_access_tier(r, 'cold')
+    elif task_type in ['u']:
+        if kwargs.get('from'):
+            c = create_cloud_fuse()
+            yaml_file = op.join('aux_data', 'azfuse', kwargs['from'] + '.yaml')
+            from_fuse = create_cloud_fuse(config=load_from_yaml_file(yaml_file))
+            for data in kwargs['remainders']:
+                c.upload_from_remote(data, from_fuse=from_fuse)
+        else:
+            raise NotImplementedError
     else:
         assert 'Unknown {}'.format(task_type)
 
@@ -70,6 +80,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Azfuse')
     parser.add_argument('-c',
                         dest='name')
+    parser.add_argument('-f',
+                        dest='from')
     parser.add_argument('task_type',
                         choices=['d', 'download',
                                  'cp',
@@ -83,6 +95,7 @@ def parse_args():
                                  'nvim',
                                  'display',
                                  'update',
+                                 'u', 'upload',
                                  ])
     parser.add_argument('remainders', nargs=argparse.REMAINDER,
             type=str)
