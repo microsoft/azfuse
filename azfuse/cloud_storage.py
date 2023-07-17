@@ -22,6 +22,7 @@ from .common import parse_iteration
 import logging
 import time
 from tqdm import tqdm
+import datetime
 import os
 from .common import ensure_directory
 logger.propagate = False
@@ -843,17 +844,29 @@ class CloudStorage(object):
         return list(self.iter_blob_info(prefix, creation_time_larger_than))
 
     def get_url(self, blob_name):
-        from azure.storage.blob.models import BlobPermissions
-        permission = BlobPermissions(read=True)
-        import datetime
-        expiry = datetime.datetime.now() + datetime.timedelta(days=30)
-        sas = self.block_blob_service.generate_blob_shared_access_signature(
-            self.container_name, blob_name,
-            permission=permission,
-            expiry=expiry,
-        )
-        url = self.block_blob_service.make_blob_url(self.container_name,
-                                                    blob_name)
+        if self.is_new_package:
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+            # BlobClient.url can also give the url, but the sas token is the
+            # default token which has more than expected permissions
+            sas = generate_blob_sas(
+                account_name=self.account_name,
+                container_name=self.container_name,
+                blob_name=blob_name,
+                account_key=self.account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.datetime.now() + datetime.timedelta(days=30))
+            url = 'https://'+self.account_name+'.blob.core.windows.net/'+self.container_name+'/'+blob_name
+        else:
+            from azure.storage.blob.models import BlobPermissions
+            permission = BlobPermissions(read=True)
+            expiry = datetime.datetime.now() + datetime.timedelta(days=30)
+            sas = self.block_blob_service.generate_blob_shared_access_signature(
+                self.container_name, blob_name,
+                permission=permission,
+                expiry=expiry,
+            )
+            url = self.block_blob_service.make_blob_url(self.container_name,
+                                                        blob_name)
         return '{}?{}'.format(url, sas)
 
     def upload_stream(self, s, name, force=False):
