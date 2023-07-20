@@ -908,27 +908,7 @@ class CloudStorage(object):
                         op.join(target_prefix, d))
 
     def upload_file(self, src_file, target_file):
-        logging.info('uploading {} to {}'.format(src_file, target_file))
-        #import time
-        #start_time = time.time()
-        bar = [None]
-        last = [0]
-        def upload_callback(curr, total):
-            if total < 1024 ** 3:
-                return
-            if bar[0] is None:
-                bar[0] = tqdm(total=total, unit_scale=True)
-            bar[0].update(curr - last[0])
-            last[0] = curr
-        if target_file.startswith('/'):
-            logging.info('remove strarting slash for {}'.format(target_file))
-            target_file = target_file[1:]
-        self.block_blob_service.create_blob_from_path(
-                self.container_name,
-                target_file,
-                src_file,
-                max_connections=8,
-                progress_callback=upload_callback)
+        self.upload(src_file, target_file)
 
     def az_upload(self, src_dir, dest_dir):
         # this is using the old version of azcopy. prefer to use az_upload2

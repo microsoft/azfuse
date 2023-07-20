@@ -127,6 +127,7 @@ class File(object):
 
     @classmethod
     def get_cache_file(cls, file_name):
+        cls.ensure_initialized()
         if cls.use_fuser:
             info = cls.fuser.get_remote_cache(file_name)
             if info:
