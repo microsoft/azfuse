@@ -792,7 +792,11 @@ class CloudStorage(object):
             self.rm(p)
 
     def rm(self, path):
-        self.block_blob_service.delete_blob(self.container_name, path)
+        if not self.is_new_package:
+            self.block_blob_service.delete_blob(self.container_name, path)
+        else:
+            blob = self.container_client.get_blob_client(path)
+            blob.delete_blob()
 
     def iter_blob_info(self, prefix=None,
                        creation_time_larger_than=None,
