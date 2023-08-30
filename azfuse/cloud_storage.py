@@ -752,6 +752,12 @@ class CloudStorage(object):
                     self._block_blob_service = BlobServiceClient(
                         account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
                         credential={'account_name': self.account_name, 'account_key': self.account_key})
+                else:
+                    from azure.identity import DefaultAzureCredential
+                    credential = DefaultAzureCredential()
+                    self._block_blob_service = BlobServiceClient(
+                        account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
+                        credential=credential)
             else:
                 from azure.storage.blob import BlockBlobService
                 self._block_blob_service = BlockBlobService(
