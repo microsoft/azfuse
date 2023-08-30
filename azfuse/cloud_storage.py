@@ -748,7 +748,7 @@ class CloudStorage(object):
                     self._block_blob_service = BlobServiceClient(
                         account_url='https://{}.blob.core.windows.net'.format(self.account_name),
                         credential=self.sas_token)
-                else:
+                elif self.account_key:
                     self._block_blob_service = BlobServiceClient(
                         account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
                         credential={'account_name': self.account_name, 'account_key': self.account_key})
