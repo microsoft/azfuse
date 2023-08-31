@@ -71,7 +71,9 @@ def execute(task_type, **kwargs):
             for data in kwargs['remainders']:
                 c.upload_from_remote(data, from_fuse=from_fuse)
         else:
-            raise NotImplementedError
+            c = create_cloud_fuse()
+            for data in kwargs['remainders']:
+                c.upload_from_cache(data)
     else:
         assert 'Unknown {}'.format(task_type)
 

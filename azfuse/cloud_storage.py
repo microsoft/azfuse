@@ -389,6 +389,13 @@ class AzFuse(object):
         ensure_remove_dir(t)
         ensure_remove_file(t)
 
+    def upload_from_cache(self, fname):
+        info = self.get_remote_cache(fname)
+        cloud = self.account2cloud[info['storage_account']]
+        remote_file = op.join(info['remote'], info['sub_name'])
+        cache_file = op.join(info['cache'], info['sub_name'])
+        cloud.upload_file(cache_file, remote_file)
+
     def upload(self, cache, fname):
         info = self.get_remote_cache(fname)
         cloud = self.account2cloud[info['storage_account']]
