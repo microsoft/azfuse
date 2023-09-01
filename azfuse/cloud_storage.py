@@ -302,6 +302,7 @@ class AzFuse(object):
         # config is a list of dictionary (local, remote, cache, storage_account)
         for c in config:
             c['local'] = op.abspath(c['local'])
+            c['cache'] = op.expanduser(c['cache'])
         self.config = config
 
         accounts = set([c['storage_account'] for c in self.config])
