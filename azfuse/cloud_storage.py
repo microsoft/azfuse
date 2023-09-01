@@ -27,6 +27,9 @@ from .common import ensure_directory
 from deprecated import deprecated
 import io
 
+logging.getLogger("azure.storage.common.storageclient").setLevel(logging.WARNING)
+logging.getLogger('azure.storage').setLevel(logging.WARNING)
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
 
 @contextlib.contextmanager
 def robust_open_to_write(fname, mode):
