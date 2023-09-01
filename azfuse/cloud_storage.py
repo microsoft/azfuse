@@ -12,7 +12,6 @@ import shutil
 import multiprocessing as mp
 import os.path as op
 from .common import ensure_remove_dir
-from azure.storage.common.storageclient import logger
 import glob
 from pprint import pformat
 from .common import load_from_yaml_file
@@ -25,7 +24,6 @@ from tqdm import tqdm
 import datetime
 import os
 from .common import ensure_directory
-logger.propagate = False
 from deprecated import deprecated
 import io
 
