@@ -730,6 +730,7 @@ class CloudStorage(object):
         account_name = config['account_name']
         account_key = config.get('account_key')
         self.sas_token = config.get('sas_token')
+        self.use_default_azure_cred = config.get('use_default_azure_cred')
         self.container_name = config['container_name']
         self.account_name = account_name
         self.account_key = account_key
@@ -761,12 +762,16 @@ class CloudStorage(object):
                     self._block_blob_service = BlobServiceClient(
                         account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
                         credential={'account_name': self.account_name, 'account_key': self.account_key})
-                else:
+                elif self.use_default_azure_cred:
                     from azure.identity import DefaultAzureCredential
                     credential = DefaultAzureCredential()
                     self._block_blob_service = BlobServiceClient(
                         account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
                         credential=credential)
+                else:
+                    self._block_blob_service = BlobServiceClient(
+                        account_url='https://{}.blob.core.windows.net/'.format(self.account_name),
+                        )
             else:
                 from azure.storage.blob import BlockBlobService
                 self._block_blob_service = BlockBlobService(
