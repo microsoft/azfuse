@@ -105,6 +105,16 @@ class File(object):
             return glob.glob(op.join(folder, '*'), recursive=recursive)
 
     @classmethod
+    def walk(cls, folder, return_info=False):
+        cls.ensure_initialized()
+        if cls.use_fuser:
+            return cls.fuser.walk(folder, recursive=recursive,
+                                  return_info=return_info)
+        else:
+            assert not return_info
+            return glob.glob(op.join(folder, '*'), recursive=recursive)
+
+    @classmethod
     def prepare(cls, file_or_fnames):
         if isinstance(file_or_fnames, str):
             file_or_fnames = [file_or_fnames]
