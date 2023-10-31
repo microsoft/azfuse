@@ -282,6 +282,7 @@ def async_upload_files(infos, account2cloud):
                 rd,
                 file_list=file_list,
             )
+            ensure_remove_file(file_list)
         else:
             for sn in sns:
                 account2cloud[ac].upload(
@@ -319,7 +320,7 @@ class AzFuse(object):
         #self._ignore_cache = False
 
     def launch_async_upload_thread(self):
-        self.async_upload_queue = mp.Queue()
+        self.async_upload_queue = mp.Manager().Queue()
         p = mp.Process(target=async_upload_thread_entry,
                    args=(self.async_upload_queue,))
         p.start()
@@ -844,11 +845,16 @@ class CloudStorage(object):
                 c1 = creation_time_larger_than is None or b.creation_time.timestamp() > creation_time_larger_than.timestamp()
                 c2 = b.name.startswith(prefix) if prefix else True
                 return c1 and c2 and (not deleted or b.deleted)
-            for b in self.container_client.list_blobs(
+            for b in self.container_client.walk_blobs(
                 name_starts_with=prefix,
                 include='deleted' if deleted else None,
             ):
-                if valid(b):
+                from azure.core.paging import ItemPaged
+                if isinstance(b, ItemPaged):
+                    yield {
+                            'name': b.name,
+                        }
+                elif valid(b):
                     yield {
                         'name': b.name,
                         'size_in_bytes': b.size,
@@ -1030,7 +1036,7 @@ class CloudStorage(object):
         if file_list:
             cmd.append('--list-of-files')
             cmd.append(file_list)
-        if int(get_azfuse_env('AZCOPY_NO_LOG', '0')):
+        if int(get_azfuse_env('AZCOPY_NO_LOG', '1')):
             import subprocess
             stdout = subprocess.DEVNULL
         else:

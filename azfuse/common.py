@@ -1,3 +1,4 @@
+import io
 import sys
 import subprocess as sp
 from collections import OrderedDict
@@ -53,21 +54,13 @@ def get_azfuse_env(v, d=None):
 def init_logging():
     ch = logging.StreamHandler(stream=sys.stdout)
     ch.setLevel(logging.INFO)
-    logger_fmt = logging.Formatter('%(asctime)s.%(msecs)03d %(process)d:%(filename)s:%(lineno)s %(funcName)10s(): %(message)s')
+    logger_fmt = logging.Formatter('%(asctime)s.%(msecs)03d %(process)d:%(filename)s:%(lineno)s %(funcName)s(): %(message)s')
     ch.setFormatter(logger_fmt)
 
     root = logging.getLogger()
     root.handlers = []
     root.addHandler(ch)
     root.setLevel(logging.INFO)
-
-@contextlib.contextmanager
-def robust_open_to_write(fname, mode):
-    tmp = fname + '.tmp'
-    ensure_directory(op.dirname(tmp))
-    with open(tmp, mode) as fp:
-        yield fp
-    os.rename(tmp, fname)
 
 def get_mpi_local_rank():
     if 'LOCAL_RANK' in os.environ:
@@ -137,7 +130,7 @@ def exclusive_open_to_read(fname, mode='r'):
     #try:
     # in AML, it could fail with Input/Output error. If it fails, we will
     # use azcopy as a fall back solution for reading
-    fp = limited_retry_agent(10, open, fname, mode)
+    fp = limited_retry_agent(10, io.open, fname, mode)
     if not disable_lock:
         releaseLock(lock_fd)
     return fp
@@ -159,7 +152,7 @@ def print_trace():
 def robust_open_to_write(fname, mode):
     tmp = fname + '.tmp'
     ensure_directory(op.dirname(tmp))
-    with open(tmp, mode) as fp:
+    with io.open(tmp, mode) as fp:
         yield fp
     os.rename(tmp, fname)
 
@@ -207,7 +200,7 @@ def hash_sha1(s):
 def acquireLock(lock_f='/tmp/lockfile.LOCK'):
     import fcntl
     ensure_directory(op.dirname(lock_f))
-    locked_file_descriptor = open(lock_f, 'w+')
+    locked_file_descriptor = io.open(lock_f, 'w+')
     fcntl.lockf(locked_file_descriptor, fcntl.LOCK_EX)
     return locked_file_descriptor
 
@@ -222,7 +215,7 @@ def write_to_file(contxt, file_name, append=False):
     flag = 'wb'
     if append:
         flag = 'ab'
-    with open(file_name, flag) as fp:
+    with io.open(file_name, flag) as fp:
         fp.write(contxt)
 
 def limited_retry_agent(num, func, *args, **kwargs):
