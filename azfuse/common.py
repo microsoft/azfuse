@@ -62,10 +62,17 @@ def init_logging():
     root.addHandler(ch)
     root.setLevel(logging.INFO)
 
+def get_env_value(keys, default):
+    for k in keys:
+        if k in os.environ:
+            return os.environ[k]
+    return default
+
 def get_mpi_local_rank():
     if 'LOCAL_RANK' in os.environ:
         return int(os.environ['LOCAL_RANK'])
-    return int(os.environ.get('OMPI_COMM_WORLD_LOCAL_RANK', '0'))
+    keys = ['OMPI_COMM_WORLD_LOCAL_RANK', 'MPI_LOCALRANKID']
+    return int(get_env_value(keys, '0'))
 
 def dict_parse_key(k, with_type):
     if with_type:
@@ -167,6 +174,7 @@ def query_all_opened_file_in_system():
                 pass
     return list(set(fs))
 
+@try_once
 def ensure_remove_file(d):
     if op.isfile(d) or op.islink(d):
         try:
