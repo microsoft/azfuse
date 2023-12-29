@@ -255,7 +255,7 @@ def list_to_dict(l, idx, keep_one=False):
     return result
 
 def find_mount_point(path):
-    path = op.abspath(path)
+    path = op.abspath(op.realpath(path))
     while not op.ismount(path):
         path = op.dirname(path)
     return path
