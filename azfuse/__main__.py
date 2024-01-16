@@ -28,7 +28,7 @@ def execute(task_type, **kwargs):
         assert len(kwargs['remainders']) == 1
         c = create_cloud_fuse()
         logging.info(c.get_url(kwargs['remainders'][0]))
-    elif task_type in ['head', 'tail', 'nvim', 'cat', 'display']:
+    elif task_type in ['head', 'tail', 'nvim', 'cat', 'display', 'open']:
         File.prepare(kwargs['remainders'])
         params = [File.get_cache_file(r) for r in kwargs['remainders']]
         from .common import cmd_run
@@ -96,6 +96,7 @@ def parse_args():
                                  'cat',
                                  'nvim',
                                  'display',
+                                 'open',
                                  'update',
                                  'u', 'upload',
                                  ])

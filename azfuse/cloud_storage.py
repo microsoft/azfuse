@@ -272,12 +272,14 @@ def async_upload_files(infos, account2cloud):
     from .common import list_to_dict
     rd_cd_ac_to_sns = list_to_dict(rd_cd_ac_and_sn, 0)
     for (rd, cd, ac), sns in rd_cd_ac_to_sns.items():
+        # if there are two files with the same name, upload will fail with --list-of-files
+        sns = list(set(sns))
         if ac not in account2cloud:
             account2cloud[ac] = create_cloud_storage(ac)
         if op.basename(rd[:-1] if rd.endswith('/') else rd) == op.basename(cd[:-1] if cd.endswith('/') else cd):
             file_list = '/tmp/{}'.format(hash_sha1(pformat(sns)))
             write_to_file('\n'.join(sns), file_list)
-            account2cloud[ac].upload(
+            limited_retry_agent(-1, account2cloud[ac].upload,
                 cd,
                 rd,
                 file_list=file_list,
@@ -294,8 +296,12 @@ def async_upload_files(infos, account2cloud):
         if i.get('clear_cache_after_upload'):
             ensure_remove_file(op.join(i['cache'], i['sub_name']))
 
+def get_azcopy_lock_file():
+    # az download/upload should share one lock
+    return op.join('/tmp', 'lock_azcopy_fuse')
+
 def acquire_azcopy_lock():
-    lock_fd = acquireLock(op.join('/tmp', 'lock_azcopy_fuse'))
+    lock_fd = acquireLock(get_azcopy_lock_file())
     return lock_fd
 
 class AzFuse(object):
@@ -311,6 +317,7 @@ class AzFuse(object):
         self.account2cloud = {a: create_cloud_storage(a) for a in accounts}
 
         self.invoked_collector = False
+        self.garbage_collector = None
         self.async_upload_enabled = False
         self.async_upload_queue = None
         self.async_upload_thread = None
@@ -319,10 +326,8 @@ class AzFuse(object):
 
         #self._ignore_cache = False
 
-    def launch_async_upload_thread(self):
-        self.async_upload_queue = mp.Manager().Queue()
-        p = mp.Process(target=async_upload_thread_entry,
-                   args=(self.async_upload_queue,))
+    def launch_async_upload_thread(self, queue):
+        p = mp.Process(target=async_upload_thread_entry, args=(queue,))
         p.start()
         return p
 
@@ -330,10 +335,6 @@ class AzFuse(object):
         info = self.get_remote_cache(fname)
         remote_file = op.join(info['remote'], info['sub_name'])
         return self.account2cloud[info['storage_account']].get_url(remote_file)
-
-    def ensure_init_async_upload_thread(self):
-        if self.async_upload_thread is None:
-            self.async_upload_thread = self.launch_async_upload_thread_entry()
 
     def isfile(self, fname):
         info = self.get_remote_cache(fname)
@@ -354,17 +355,19 @@ class AzFuse(object):
 
     @contextlib.contextmanager
     def async_upload(self, enabled, shm_as_tmp=False):
-        old = self.async_upload_enabled
+        old_enabled = self.async_upload_enabled
         self.async_upload_enabled = enabled
-        if enabled:
-            thread = self.launch_async_upload_thread()
+        old_shm = self.shm_as_upload_tmp
+        if enabled and not old_enabled:
+            self.async_upload_queue = mp.Manager().Queue()
+            self.async_upload_thread = self.launch_async_upload_thread(self.async_upload_queue)
             self.shm_as_upload_tmp = shm_as_tmp
         yield
-        if enabled:
+        if enabled and not old_enabled:
             self.async_upload_queue.put(None)
-            thread.join()
-        self.async_upload_enabled = old
-        self.shm_as_upload_tmp = False
+            self.async_upload_thread.join()
+        self.async_upload_enabled = old_enabled
+        self.shm_as_upload_tmp = old_shm
 
     def get_file_size(self, fname):
         info = self.get_remote_cache(fname)
@@ -386,11 +389,16 @@ class AzFuse(object):
             remote_file)['creation_time']
 
     def clear_cache(self, folder):
-        info = self.get_remote_cache(folder)
-        t = op.join(info['cache'], info['sub_name'])
-        logging.info(t)
-        ensure_remove_dir(t)
-        ensure_remove_file(t)
+        if isinstance(folder, str):
+            folders = [folder]
+        else:
+            folders = folder
+        logging.info('clearing {}'.format(','.join(folders)))
+        for f in folders:
+            info = self.get_remote_cache(f)
+            t = op.join(info['cache'], info['sub_name'])
+            ensure_remove_dir(t)
+            ensure_remove_file(t)
 
     def upload_from_cache(self, fname):
         info = self.get_remote_cache(fname)
@@ -447,42 +455,34 @@ class AzFuse(object):
             remote_cache_infos = [info for info in remote_cache_infos if
                                   not op.isfile(op.join(info['cache'], info['sub_name']))]
             if len(remote_cache_infos) > 0:
-                lock_fd = self.acquireLock()
-                # we need to check again
-                remote_cache_infos = [info for info in remote_cache_infos if
-                                      not op.isfile(op.join(info['cache'], info['sub_name']))]
-                remote_cache_infos = [((info['remote'], info['cache']), info) for info in remote_cache_infos]
-                from .common import list_to_dict
-                rd_cd_to_infos = list_to_dict(remote_cache_infos, 0)
-                for (rd, cd), infos in rd_cd_to_infos.items():
-                    sns = [i['sub_name'] for i in infos]
-                    assert all(i['storage_account'] == infos[0]['storage_account'] for i in infos)
+                from .common import acquire_lock
+                with acquire_lock(get_azcopy_lock_file()) as lock_fd:
+                    # we need to check again
+                    remote_cache_infos = [info for info in remote_cache_infos if
+                                          not op.isfile(op.join(info['cache'], info['sub_name']))]
+                    remote_cache_infos = [((info['remote'], info['cache']), info) for info in remote_cache_infos]
+                    from .common import list_to_dict
+                    rd_cd_to_infos = list_to_dict(remote_cache_infos, 0)
+                    for (rd, cd), infos in rd_cd_to_infos.items():
+                        sns = [i['sub_name'] for i in infos]
+                        assert all(i['storage_account'] == infos[0]['storage_account'] for i in infos)
 
-                    assert all(i['cache_lock'] == infos[0]['cache_lock'] for i in infos)
-                    cache_lock = infos[0]['cache_lock']
-                    if cache_lock:
-                        cache_lock_file = cd + '.lockfile'
-                        cache_lock_pt = acquireLock(cache_lock_file)
-                        sns = [s for s in sns if not op.isfile(op.join(cd, s))]
-                    if len(sns) > 0:
-                        file_list = '/tmp/{}'.format(hash_sha1(pformat(sns)))
-                        write_to_file('\n'.join(sns), file_list)
-                        cloud = self.account2cloud[infos[0]['storage_account']]
-                        cloud.az_download(
-                            rd,
-                            cd,
-                            is_folder=False,
-                            file_list=file_list,
-                            tmp_first=False,
-                            sync=False,
-                            retry=1,
-                        )
-                        for s in sns:
-                            if not op.isfile(op.join(cd, s)):
-                                logging.error((op.join(cd, s), file_list))
-                    if cache_lock:
-                        releaseLock(cache_lock_pt)
-                releaseLock(lock_fd)
+                        if len(sns) > 0:
+                            file_list = '/tmp/{}'.format(hash_sha1(pformat(sns)))
+                            write_to_file('\n'.join(sns), file_list)
+                            cloud = self.account2cloud[infos[0]['storage_account']]
+                            cloud.az_download(
+                                rd,
+                                cd,
+                                is_folder=False,
+                                file_list=file_list,
+                                tmp_first=False,
+                                sync=False,
+                                retry=5,
+                            )
+                            for s in sns:
+                                if not op.isfile(op.join(cd, s)):
+                                    logging.error((op.join(cd, s), file_list))
 
     def open(self, fname, mode):
         info = self.get_remote_cache(fname)
@@ -507,14 +507,9 @@ class AzFuse(object):
             import copy
             info = copy.deepcopy(info)
             assert info['cache'][0] == '/'
-            info['cache'] = op.join('/dev/shm', info['cache'][1:])
+            if not info['cache'].startswith('/dev/shm'):
+                info['cache'] = op.join('/dev/shm', info['cache'][1:])
             info['clear_cache_after_upload'] = True
-            cache_file = op.join(info['cache'], info['sub_name'])
-            while op.isfile(cache_file):
-                info['cache'] += '_'
-                cache_file = op.join(info['cache'], info['sub_name'])
-                logging.warning('use another cache file: {}'
-                             .format(cache_file))
         cache_file = op.join(info['cache'], info['sub_name'])
         tmp_cache_file = cache_file + '.tmpwrite'
         ensure_directory(op.dirname(tmp_cache_file))
@@ -855,13 +850,16 @@ class CloudStorage(object):
                             'name': b.name,
                         }
                 elif valid(b):
-                    yield {
+                    ret = {
                         'name': b.name,
                         'size_in_bytes': b.size,
                         'creation_time': b.creation_time,
                         'last_modified': b.last_modified,
-                        'blob_tier': self.get_access_tier(b)
+                        'blob_tier': self.get_access_tier(b),
+                        'deleted': b.deleted,
+                        'lease_status': b.lease['status'],
                     }
+                    yield ret
 
     def get_access_tier(self, blob_properties):
         blob_tier = blob_properties.blob_tier
@@ -899,26 +897,30 @@ class CloudStorage(object):
                                                         blob_name)
         return '{}?{}'.format(url, sas)
 
-    def upload_stream(self, s, name, force=False):
-        if not force and self.block_blob_service.exists(self.container_name,
-                name):
-            return self.block_blob_service.make_blob_url(
-                    self.container_name,
-                    name)
+    def upload_stream(self, s, path, force=False, lease=None):
+        if self.is_new_package:
+            blob_client = self.container_client.get_blob_client(path)
+            blob_client.upload_blob(s, lease=lease, overwrite=force)
         else:
-            if type(s) is bytes:
-                self.block_blob_service.create_blob_from_bytes(
+            if not force and self.block_blob_service.exists(self.container_name,
+                    path):
+                return self.block_blob_service.make_blob_url(
                         self.container_name,
-                        name,
-                        s)
+                        path)
             else:
-                self.block_blob_service.create_blob_from_stream(
+                if type(s) is bytes:
+                    self.block_blob_service.create_blob_from_bytes(
+                            self.container_name,
+                            path,
+                            s)
+                else:
+                    self.block_blob_service.create_blob_from_stream(
+                            self.container_name,
+                            path,
+                            s)
+                return self.block_blob_service.make_blob_url(
                         self.container_name,
-                        name,
-                        s)
-            return self.block_blob_service.make_blob_url(
-                    self.container_name,
-                    name)
+                        path)
 
     def upload_folder(self, folder, target_prefix):
         def remove_tailing(x):
@@ -1000,9 +1002,11 @@ class CloudStorage(object):
         if int(get_azfuse_env('AZCOPY_NO_LOG', '0')):
             import subprocess
             stdout = subprocess.DEVNULL
+            silent = True
         else:
             stdout = None
-        cmd_run(cmd, stdout=stdout, stderr=sp.PIPE)
+            silent = False
+        cmd_run(cmd, stdout=stdout, stderr=sp.PIPE, silent=silent)
         return data_url, url
 
     def upload_from_local(self, src_dir, dest_dir, file_list=None):
@@ -1015,9 +1019,12 @@ class CloudStorage(object):
             # destination folder, and thus we have to use the folder of
             # dest_dir as the dest_dir.
             assert op.basename(src_dir) == op.basename(dest_dir)
+            if dest_dir.endswith('/'):
+                dest_dir = dest_dir[:-1]
             dest_dir = op.dirname(dest_dir)
             cmd.append('cp')
         else:
+            logging.info(dest_dir)
             if file_list is None and self.exists(dest_dir):
                 cmd.append('sync')
             else:
@@ -1039,9 +1046,11 @@ class CloudStorage(object):
         if int(get_azfuse_env('AZCOPY_NO_LOG', '1')):
             import subprocess
             stdout = subprocess.DEVNULL
+            silent = True
         else:
             stdout = None
-        cmd_run(cmd, stdout=stdout)
+            silent = False
+        cmd_run(cmd, stdout=stdout, silent=silent)
         return data_url, url
 
     @deprecated('use upload')
@@ -1131,6 +1140,56 @@ class CloudStorage(object):
                             remote_path, local_path, sync,
                             is_folder, tmp_first, file_list)
 
+    @contextlib.contextmanager
+    def acquire_lease(self, path, metadata=None):
+        from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
+        blob_client = self.container_client.get_blob_client(path)
+        metadata = metadata or {}
+        while True:
+            try:
+                lease = blob_client.acquire_lease()
+                blob_client.set_blob_metadata(metadata, lease=lease)
+                break
+            except ResourceNotFoundError:
+                from .common import try_once
+                try_once(blob_client.upload_blob)(b'', overwrite=True)
+                # blob_client.upload_blob(b'', overwrite=True)
+            except ResourceExistsError:
+                logging.info(f'there is a process leased {path}; waiting')
+                time.sleep(10)
+        yield lease
+        lease.release()
+
+    @contextlib.contextmanager
+    def acquire_lease_renew(self, path, metadata=None):
+        from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
+        blob_client = self.container_client.get_blob_client(path)
+        metadata = metadata or {}
+        while True:
+            try:
+                lease = blob_client.acquire_lease(lease_duration=60)
+                blob_client.set_blob_metadata(metadata, lease=lease)
+                break
+            except ResourceNotFoundError:
+                logging.info('lock is not available; waiting for creating')
+                time.sleep(10)
+            except ResourceExistsError:
+                logging.info(f'there is a process leased {path}; waiting')
+                time.sleep(10)
+        import threading
+        continue_leasing = True
+        def renew_lease(lease):
+            while continue_leasing:
+                lease.renew()
+                for _ in range(10):
+                    if continue_leasing:
+                        time.sleep(2)
+        th = threading.Thread(target=renew_lease, args=(lease,), daemon=True)
+        th.start()
+        yield lease
+        continue_leasing = False
+        th.join()
+        lease.release()
 
     def az_download_once(self,
                     remote_path,
@@ -1259,12 +1318,22 @@ class CloudStorage(object):
                                                    max_connections=max_connections,
                                                    progress_callback=progress_callback,
                                                    )
+    def readall(self, path):
+        blob_client = self.container_client.get_blob_client(path)
+        return blob_client.download_blob().readall()
+
+    def get_metadata(self, path):
+        blob_client = self.container_client.get_blob_client(path)
+        return blob_client.get_blob_properties()['metadata']
+
+    def set_metadata(self, metadata, path, **kwargs):
+        blob_client = self.container_client.get_blob_client(path)
+        return blob_client.set_blob_metadata(metadata, **kwargs)
 
     def exists(self, path):
         return self.file_exists(path) or self.dir_exists(path)
 
     def file_exists(self, path):
-        fp = acquireLock('/tmp/{}.lock'.format(hash_sha1(path)))
         if self.is_new_package:
             result = self.container_client.get_blob_client(path).exists()
         else:
@@ -1274,8 +1343,6 @@ class CloudStorage(object):
                 self.container_name,
                 path
             )
-            #result = self.block_blob_service.exists(self.container_name, path)
-        releaseLock(fp)
         return result
 
     def dir_exists(self, dir_path):

@@ -205,6 +205,15 @@ def hash_sha1(s):
         s = pformat(s)
     return hashlib.sha1(s.encode('utf-8')).hexdigest()
 
+@contextlib.contextmanager
+def acquire_lock(lock_f):
+    import fcntl
+    ensure_directory(op.dirname(lock_f))
+    locked_file_descriptor = open(lock_f, 'w+')
+    fcntl.lockf(locked_file_descriptor, fcntl.LOCK_EX)
+    yield locked_file_descriptor
+    locked_file_descriptor.close()
+
 def acquireLock(lock_f='/tmp/lockfile.LOCK'):
     import fcntl
     ensure_directory(op.dirname(lock_f))
@@ -227,7 +236,8 @@ def write_to_file(contxt, file_name, append=False):
         fp.write(contxt)
 
 def limited_retry_agent(num, func, *args, **kwargs):
-    for i in range(num):
+    i = 0
+    while True:
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -238,7 +248,7 @@ def limited_retry_agent(num, func, *args, **kwargs):
             ))
             import time
             print_trace()
-            if i == num - 1:
+            if num > 0 and i == num - 1:
                 raise
             t = random.random() * 5
             time.sleep(t)

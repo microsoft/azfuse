@@ -26,13 +26,6 @@ class File(object):
                 gc  = int(get_azfuse_env('USE_FUSE_ENABLE_GARBAGE_COLLECTION', '0'))
                 if gc and get_mpi_local_rank() == 0:
                     cls.fuser.ensure_invoke_garbage_collect()
-                fs = get_azfuse_env('USE_FUSE_DOWNLOAD_FILE_LIST_AT_INIT', None)
-                if fs:
-                    cache = []
-                    for f in fs.split(','):
-                        with cls.fuser.open(f) as fp:
-                            cache.extend([l.strip() for l in fp])
-                    cls.fuser.ensure_cache(cache)
 
     @classmethod
     def isfile(cls, path):
