@@ -4,6 +4,7 @@ from pprint import pformat
 import logging
 from .azfuse import File
 from .common import load_from_yaml_file
+from .common import try_once
 from .cloud_storage import create_cloud_fuse
 
 
@@ -12,7 +13,6 @@ def execute(task_type, **kwargs):
         yaml_file = op.join('aux_data', 'azfuse', kwargs['name'] + '.yaml')
         os.environ['QD_CLOUD_FUSE_CONFIG_FILE'] = yaml_file
         os.environ['AZFUSE_CLOUD_FUSE_CONFIG_FILE'] = yaml_file
-
     if task_type in ['download', 'd']:
         File.prepare(kwargs['remainders'])
     elif task_type in ['cp']:
@@ -28,7 +28,8 @@ def execute(task_type, **kwargs):
         assert len(kwargs['remainders']) == 1
         c = create_cloud_fuse()
         logging.info(c.get_url(kwargs['remainders'][0]))
-    elif task_type in ['head', 'tail', 'nvim', 'cat', 'display']:
+    elif task_type in ['head', 'tail', 'nvim', 'cat', 'display', 'open']:
+        File.clear_cache(kwargs['remainders'])
         File.prepare(kwargs['remainders'])
         params = [File.get_cache_file(r) for r in kwargs['remainders']]
         from .common import cmd_run
@@ -55,11 +56,18 @@ def execute(task_type, **kwargs):
             File.upload(params[-1], fname)
     elif task_type in ['rm']:
         for r in kwargs['remainders']:
-            import azure
-            try:
-                File.rm(r)
-            except azure.common.AzureMissingResourceHttpError:
-                pass
+            try_once(File.rm)(r)
+    elif task_type in ['rmtree']:
+        c = create_cloud_fuse()
+        all_file = []
+        for r in kwargs['remainders']:
+            files = c.list(r, recursive=True, return_info=True)
+            all_file.extend(files)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(try_once(c.rm), f['name']) for f in all_file]
+            from tqdm import tqdm
+            [future.result() for future in tqdm(as_completed(futures))]
     elif task_type == 'cold':
         for r in kwargs['remainders']:
             File.set_access_tier(r, 'cold')
@@ -74,6 +82,15 @@ def execute(task_type, **kwargs):
             c = create_cloud_fuse()
             for data in kwargs['remainders']:
                 c.upload_from_cache(data)
+    elif task_type in ['meta']:
+        c = create_cloud_fuse()
+        logging.info(c.get_meta(kwargs['remainders'][0]))
+    elif task_type in ['clear_meta']:
+        c = create_cloud_fuse()
+        logging.info(c.set_meta({}, kwargs['remainders'][0]))
+    elif task_type in ['break']:
+        c = create_cloud_fuse()
+        c.break_lease(kwargs['remainders'][0])
     else:
         assert 'Unknown {}'.format(task_type)
 
@@ -91,13 +108,19 @@ def parse_args():
                                  'ls',
                                  'cold',
                                  'rm',
+                                 'rmtree',
                                  'head',
                                  'tail',
                                  'cat',
                                  'nvim',
                                  'display',
+                                 'open',
                                  'update',
-                                 'u', 'upload',
+                                 'u', 
+                                 'upload',
+                                 'meta',
+                                 'clear_meta',
+                                 'break',
                                  ])
     parser.add_argument('remainders', nargs=argparse.REMAINDER,
             type=str)

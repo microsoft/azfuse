@@ -29,7 +29,7 @@ def test_prepare_in_batch():
             fp.write(str(i))
     File.clear_cache('data/batch_test')
 
-    File.prepare(['data/batch_test/{}.txt'.format(i)] for i in range(num))
+    File.prepare(['data/batch_test/{}.txt'.format(i) for i in range(num)])
     for i in range(num):
         with File.open('data/batch_test/{}.txt'.format(i), 'r') as fp:
             content = fp.read()
@@ -46,7 +46,7 @@ def test_async_upload():
                 fp.write(str(i + 10))
     File.clear_cache('data/batch_test')
 
-    File.prepare(['data/batch_test/{}.txt'.format(i)] for i in range(num))
+    File.prepare(['data/batch_test/{}.txt'.format(i) for i in range(num)])
     for i in range(num):
         with File.open('data/batch_test/{}.txt'.format(i), 'r') as fp:
             content = fp.read()

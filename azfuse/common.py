@@ -12,11 +12,60 @@ import psutil
 import os.path as op
 import os
 import contextlib
+import time
 
+
+
+def get_azfuse_env(v, d=None):
+    # this is for back-compatibility only
+    qd_k = 'QD_' + v
+    if qd_k in os.environ:
+        return os.environ[qd_k]
+    azfuse_k = 'AZFUSE_' + v
+    if azfuse_k in os.environ:
+        return os.environ[azfuse_k]
+    return d
+
+def init_logging():
+    ch = logging.StreamHandler(stream=sys.stdout)
+    ch.setLevel(logging.INFO)
+    logger_fmt = logging.Formatter('%(asctime)s.%(msecs)03d %(process)d:%(filename)s:%(lineno)s %(funcName)s(): %(message)s')
+    ch.setFormatter(logger_fmt)
+
+    root = logging.getLogger()
+    root.handlers = []
+    root.addHandler(ch)
+    root.setLevel(logging.INFO)
+
+def create_logger():
+    logger = logging.getLogger('azfuse')
+    logger.propagate = False
+
+    ch = logging.StreamHandler(stream=sys.stdout)
+    # ch.setLevel(logging.WARNING)
+    ch.setLevel(logging.INFO)
+
+    logger_fmt = logging.Formatter('%(asctime)s %(process)d:%(filename)s:%(lineno)s %(funcName)10s(): %(message)s')
+    ch.setFormatter(logger_fmt)
+
+    logger.handlers = []
+    logger.addHandler(ch)
+    log_file='~/.azfuse.log'
+    log_file = op.expanduser(log_file)
+    from logging.handlers import RotatingFileHandler
+    fh = RotatingFileHandler(log_file, maxBytes=10*1024*1024*1024, backupCount=5)
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logger_fmt)
+    logger.addHandler(fh)
+
+    logger.setLevel(logging.INFO)
+    return logger
+
+logger = create_logger()
 
 def get_table_print_lines(a_to_bs, all_key):
     if len(a_to_bs) == 0:
-        logging.info('no rows')
+        logger.info('no rows')
         return []
     if not all_key:
         all_key = []
@@ -39,28 +88,7 @@ def print_table(a_to_bs, all_key=None, **kwargs):
     if len(a_to_bs) == 0:
         return
     all_line = get_table_print_lines(a_to_bs, all_key)
-    logging.info('\n{}'.format('\n'.join(all_line)))
-
-def get_azfuse_env(v, d=None):
-    # this is for back-compatibility only
-    qd_k = 'QD_' + v
-    if qd_k in os.environ:
-        return os.environ[qd_k]
-    azfuse_k = 'AZFUSE_' + v
-    if azfuse_k in os.environ:
-        return os.environ[azfuse_k]
-    return d
-
-def init_logging():
-    ch = logging.StreamHandler(stream=sys.stdout)
-    ch.setLevel(logging.INFO)
-    logger_fmt = logging.Formatter('%(asctime)s.%(msecs)03d %(process)d:%(filename)s:%(lineno)s %(funcName)s(): %(message)s')
-    ch.setFormatter(logger_fmt)
-
-    root = logging.getLogger()
-    root.handlers = []
-    root.addHandler(ch)
-    root.setLevel(logging.INFO)
+    logger.info('\n{}'.format('\n'.join(all_line)))
 
 def get_env_value(keys, default):
     for k in keys:
@@ -147,7 +175,7 @@ def try_once(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logging.info('ignore error \n{}'.format(str(e)))
+            logger.info('ignore error \n{}'.format(str(e)))
             print_trace()
     return func_wrapper
 
@@ -196,6 +224,11 @@ def has_handle(fpath, opened_files=None):
     else:
         return fpath in opened_files
 
+def wait_if_zero_file_size(f, t=10):
+    if get_file_size(f) == 0:
+        time.sleep(t)
+
+@try_once
 def get_file_size(f):
     return os.stat(f).st_size
 
@@ -204,6 +237,15 @@ def hash_sha1(s):
     if type(s) is not str:
         s = pformat(s)
     return hashlib.sha1(s.encode('utf-8')).hexdigest()
+
+@contextlib.contextmanager
+def acquire_lock(lock_f):
+    import fcntl
+    ensure_directory(op.dirname(lock_f))
+    locked_file_descriptor = open(lock_f, 'w+')
+    fcntl.lockf(locked_file_descriptor, fcntl.LOCK_EX)
+    yield locked_file_descriptor
+    locked_file_descriptor.close()
 
 def acquireLock(lock_f='/tmp/lockfile.LOCK'):
     import fcntl
@@ -227,19 +269,24 @@ def write_to_file(contxt, file_name, append=False):
         fp.write(contxt)
 
 def limited_retry_agent(num, func, *args, **kwargs):
-    for i in range(num):
+    i = 0
+    retry_pre_func = kwargs.pop('__retry_pre_func', None)
+    while True:
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logging.warning('fails with \n{}: tried {}/{}-th time'.format(
+            logger.warning('fails with \n{}: tried {}/{}-th time'.format(
                 e,
                 i + 1,
                 num,
             ))
             import time
             print_trace()
-            if i == num - 1:
+            if num > 0 and i == num - 1:
                 raise
+            i += 1
+            if retry_pre_func:
+                retry_pre_func()
             t = random.random() * 5
             time.sleep(t)
 
@@ -321,9 +368,9 @@ def cmd_run(list_cmd,
             ):
     if not silent:
         x = ' '.join(map(str, list_cmd)) if isinstance(list_cmd, list) else list_cmd
-        logging.info('start to cmd run: {}'.format(x))
+        logger.info('start to cmd run: {}'.format(x))
         if working_dir:
-            logging.info(working_dir)
+            logger.info(working_dir)
     # if we dont' set stdin as sp.PIPE, it will complain the stdin is not a tty
     # device. Maybe, the reson is it is inside another process.
     # if stdout=sp.PIPE, it will not print the result in the screen
@@ -371,7 +418,7 @@ def cmd_run(list_cmd,
                                   timeout=timeout,
                                   )
         if not silent:
-            logging.info('finished the cmd run')
+            logger.info('finished the cmd run')
         return decode_to_str(message)
 
 def ensure_directory(path):
@@ -399,6 +446,71 @@ def parse_iteration(file_name):
         r = re.match(p, file_name)
         if r is not None:
             return int(float(r.groups()[0]))
-    logging.info('unable to parse the iterations for {}'.format(file_name))
+    logger.info('unable to parse the iterations for {}'.format(file_name))
     return -2
+
+def load_list_file(fname):
+    with open(fname, 'r') as fp:
+        lines = fp.readlines()
+    result = [line.strip() for line in lines]
+    if len(result) > 0 and result[-1] == '':
+        result = result[:-1]
+    return result
+
+def yaml_save(data, fname):
+    tmp = fname + '.tmp'
+    with open(tmp, 'w') as fp:
+        yaml.dump(data, fp, default_flow_style=False, encoding='utf-8', allow_unicode=True)
+    os.rename(tmp, fname)
+
+def yaml_load(fname):
+    if isinstance(fname, bytes):
+        return yaml.unsafe_load(fname)
+    with open(fname, 'r') as fp:
+        return yaml.unsafe_load(fp)
+
+class FileQueue(object):
+    def __init__(self, folder):
+        self.folder = folder
+        ensure_directory(folder)
+
+    def get_status_file(self):
+        status_yaml = op.join(self.folder, 'status.yaml')
+        return status_yaml
+
+    def clear(self):
+        # not sure if we need to add lock
+        yaml_save({'start': 0, 'end': 0}, self.get_status_file())
+
+    def put(self, ls):
+        with acquire_lock(op.join(self.folder, 'lock')):
+            status_yaml = self.get_status_file()
+            if not op.isfile(status_yaml):
+                status = {'start': 0, 'end': 0}
+            else:
+                status = yaml_load(status_yaml)
+            idx = status['end']
+            out_fname = op.join(self.folder, f'{idx:04d}')
+            if isinstance(ls, str):
+                ls = [ls]
+            write_to_file('\n'.join(ls), out_fname)
+            status['end'] += 1
+            yaml_save(status, status_yaml)
+
+    def pop(self, topk=1):
+        while True:
+            with acquire_lock(op.join(self.folder, 'lock')):
+                if op.isfile(self.get_status_file()):
+                    status = yaml_load(self.get_status_file())
+                    if status['start'] != status['end']:
+                        topk = min(status['end'] - status['start'], topk)
+                        ret = []
+                        for i in range(topk):
+                            idx = status['start'] + i
+                            out_fname = op.join(self.folder, f'{idx:04d}')
+                            ret += load_list_file(out_fname)
+                        status['start'] += topk
+                        yaml_save(status, self.get_status_file())
+                        return ret
+            time.sleep(10)
 
