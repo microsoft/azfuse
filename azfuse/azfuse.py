@@ -16,13 +16,13 @@ class File(object):
     fuser = None
 
     @classmethod
-    def ensure_initialized(cls):
+    def ensure_initialized(cls, config=None):
         if not cls.initialized:
             cls.initialized = True
             # TSV_USE_FUSE is only for back-compatibility
             cls.use_fuser = int(get_azfuse_env('TSV_USE_FUSE', '0')) + int(get_azfuse_env('USE_FUSE', '0'))
             if cls.use_fuser:
-                cls.fuser = create_cloud_fuse()
+                cls.fuser = create_cloud_fuse(config=config)
                 gc  = int(get_azfuse_env('USE_FUSE_ENABLE_GARBAGE_COLLECTION', '0'))
                 if gc and get_mpi_local_rank() == 0:
                     cls.fuser.ensure_invoke_garbage_collect()
@@ -72,12 +72,26 @@ class File(object):
         return cls.fuser.async_upload(enabled, shm_as_tmp)
 
     @classmethod
-    @property
-    def async_upload_queue(cls):
+    def send_to_async_upload(cls, fname_or_fnames, clear_cache_after_upload=False):
         cls.ensure_initialized()
         if not cls.use_fuser:
-            return
-        return cls.fuser.async_upload_queue
+            return contextlib.nullcontext()
+        return cls.fuser.send_to_async_upload(fname_or_fnames, clear_cache_after_upload=clear_cache_after_upload)
+
+    @classmethod
+    def create_download_process(cls, clear_queue=False):
+        assert cls.use_fuser
+        cls.fuser.create_download_process(clear_queue=clear_queue)
+
+    @classmethod
+    def is_cached(cls, fname):
+        assert cls.use_fuser
+        return cls.fuser.is_cached(fname)
+
+    @classmethod
+    def request_to_download(cls, fs):
+        assert cls.use_fuser
+        cls.fuser.request_to_download(fs)
 
     @classmethod
     def get_file_size(cls, fname):
@@ -127,6 +141,12 @@ class File(object):
         cls.ensure_initialized()
         if cls.use_fuser:
             cls.fuser.upload(cache, remote)
+
+    @classmethod
+    def read_byte_range(cls, fname, offset, length):
+        cls.ensure_initialized()
+        assert cls.use_fuser
+        return cls.fuser.read_from_cloud(fname, offset, length)
 
     @classmethod
     def get_cache_file(cls, file_name):
