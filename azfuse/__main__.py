@@ -24,6 +24,24 @@ def execute(task_type, **kwargs):
         for r in ret:
             r['name'] = r['name'].replace(kwargs['remainders'][0], '')
         print_table(ret)
+    elif task_type in ['lsd']:
+        assert len(kwargs['remainders']) == 1
+        ret = File.list(kwargs['remainders'][0], 
+                        recursive=True,
+                        return_info=True, 
+                        ls_deleted=True)
+        from .common import print_table
+        for r in ret:
+            r['name'] = r['name'].replace(kwargs['remainders'][0], '')
+        ret = [r for r in ret if not r['name'].endswith('/')]
+        print_table(ret)
+    elif task_type in ['restore']:
+        c = create_cloud_fuse()
+        for p in kwargs['remainders']:
+            try:
+                c.undelete(p)
+            except:
+                continue
     elif task_type in ['url']:
         assert len(kwargs['remainders']) == 1
         c = create_cloud_fuse()
@@ -121,6 +139,8 @@ def parse_args():
                                  'meta',
                                  'clear_meta',
                                  'break',
+                                 'lsd',
+                                 'restore',
                                  ])
     parser.add_argument('remainders', nargs=argparse.REMAINDER,
             type=str)

@@ -270,6 +270,8 @@ def write_to_file(contxt, file_name, append=False):
 
 def limited_retry_agent(num, func, *args, **kwargs):
     i = 0
+    import traceback
+    entry_stack = traceback.format_stack()
     retry_pre_func = kwargs.pop('__retry_pre_func', None)
     while True:
         try:
@@ -280,6 +282,9 @@ def limited_retry_agent(num, func, *args, **kwargs):
                 i + 1,
                 num,
             ))
+            logger.info("====== CALLER STACK (from script entry) ======")
+            logger.info("".join(entry_stack))
+
             import time
             print_trace()
             if num > 0 and i == num - 1:
